@@ -37,7 +37,7 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func newMux() *http.ServeMux {
+func NewMux() *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /metrics", metricsHandler)

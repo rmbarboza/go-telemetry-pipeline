@@ -134,7 +134,7 @@ func TestHTTPRouteMetric(t *testing.T) {
 		},
 	}
 
-	mux := newMux()
+	mux := NewMux()
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
