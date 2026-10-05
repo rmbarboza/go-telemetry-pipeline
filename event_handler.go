@@ -19,17 +19,7 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if metric.Timestamp == nil {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	if metric.Key == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	if metric.Value == nil {
+	if err := validateEvent(metric); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
