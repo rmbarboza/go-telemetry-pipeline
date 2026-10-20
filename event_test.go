@@ -2,10 +2,13 @@ package gotelemetrypipeline
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 const validID = "01890123-4567-7890-a123-456789abcdef"
@@ -92,16 +95,18 @@ func TestHTTPRouteMetric(t *testing.T) {
 		wantStatus int
 	}
 
+	now := time.Now()
+
 	tests := []testCase{
 		{
 			name:       "json without Value",
-			body:       `{"id": "` + validID + `","timestamp": 1790085318, "key": "input_traffic"}`,
+			body:       `{"id": "` + validID + `","timestamp": ` + strconv.FormatInt(now.Unix(), 10) + `, "key": "input_traffic"}`,
 			method:     "POST",
 			wantStatus: http.StatusBadRequest,
 		},
 		{
 			name:       "json with value",
-			body:       `{"id": "` + validID + `","timestamp": 1790085318, "key": "input_traffic", "value": 0}`,
+			body:       `{"id": "` + validID + `","timestamp": ` + strconv.FormatInt(now.Unix(), 10) + `, "key": "input_traffic", "value": 0}`,
 			method:     "POST",
 			wantStatus: http.StatusOK,
 		},
@@ -120,17 +125,17 @@ func TestHTTPRouteMetric(t *testing.T) {
 			name:       "json with timestamp 0",
 			body:       `{"id": "` + validID + `","timestamp": 0, "key": "input_traffic", "value": 0}`,
 			method:     "POST",
-			wantStatus: http.StatusOK,
+			wantStatus: http.StatusBadRequest,
 		},
 		{
 			name:       "json without key",
-			body:       `{"id": "` + validID + `","timestamp": 1790085318, "value": 0}`,
+			body:       `{"id": "` + validID + `","timestamp": ` + strconv.FormatInt(now.Unix(), 10) + `, "value": 0}`,
 			method:     "POST",
 			wantStatus: http.StatusBadRequest,
 		},
 		{
 			name:       "json with key empty string",
-			body:       `{"id": "` + validID + `","timestamp": 1790085318, "key": "", "value": 0}`,
+			body:       `{"id": "` + validID + `","timestamp": ` + strconv.FormatInt(now.Unix(), 10) + `, "key": "", "value": 0}`,
 			method:     "POST",
 			wantStatus: http.StatusBadRequest,
 		},
@@ -165,50 +170,88 @@ func TestValidateEvent(t *testing.T) {
 		wantErr bool
 	}
 
+	now := time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC)
+	validTs := uint64(now.Unix())
+
 	tests := []testCase{
 		{
-			name:    "json with valid id",
-			event:   Event{ID: validID, Timestamp: new(uint64(1790085318)), Key: "input_traffic", Value: new(100.0)},
+			name:    "valid id",
+			event:   Event{ID: validID, Timestamp: new(validTs), Key: "input_traffic", Value: new(100.0)},
 			wantErr: false,
 		},
 		{
-			name:    "json with 255 x ç in key",
-			event:   Event{ID: validID, Timestamp: new(uint64(1790085318)), Key: strings.Repeat("ç", 255), Value: new(100.0)},
+			name:    "255 x ç in key",
+			event:   Event{ID: validID, Timestamp: new(validTs), Key: strings.Repeat("ç", 255), Value: new(100.0)},
 			wantErr: false,
 		},
 		{
-			name:    "json with missing id",
-			event:   Event{Timestamp: new(uint64(1790085318)), Key: "input_traffic", Value: new(100.0)},
+			name:    "missing id",
+			event:   Event{Timestamp: new(validTs), Key: "input_traffic", Value: new(100.0)},
 			wantErr: true,
 		},
 		{
-			name:    "json with id = abc",
-			event:   Event{ID: "abc", Timestamp: new(uint64(1790085318)), Key: "input_traffic", Value: new(100.0)},
+			name:    "id = abc",
+			event:   Event{ID: "abc", Timestamp: new(validTs), Key: "input_traffic", Value: new(100.0)},
 			wantErr: true,
 		},
 		{
-			name:    "json with id v4",
-			event:   Event{ID: "380b7a52-7f5b-44ee-a71a-e33727055168", Timestamp: new(uint64(1790085318)), Key: "input_traffic", Value: new(100.0)},
+			name:    "id v4",
+			event:   Event{ID: "380b7a52-7f5b-44ee-a71a-e33727055168", Timestamp: new(validTs), Key: "input_traffic", Value: new(100.0)},
 			wantErr: true,
 		},
 		{
-			name:    "json with id with brackets",
-			event:   Event{ID: "{01890123-4567-7890-a123-456789abcdef}", Timestamp: new(uint64(1790085318)), Key: "input_traffic", Value: new(100.0)},
+			name:    "id with brackets",
+			event:   Event{ID: "{01890123-4567-7890-a123-456789abcdef}", Timestamp: new(validTs), Key: "input_traffic", Value: new(100.0)},
 			wantErr: true,
 		},
 		{
-			name:    "json with id without hifens",
-			event:   Event{ID: "0189012345677890a123456789abcdef", Timestamp: new(uint64(1790085318)), Key: "input_traffic", Value: new(100.0)},
+			name:    "id without hifens",
+			event:   Event{ID: "0189012345677890a123456789abcdef", Timestamp: new(validTs), Key: "input_traffic", Value: new(100.0)},
 			wantErr: true,
 		},
 		{
-			name:    "json with 256 x a in key",
-			event:   Event{ID: validID, Timestamp: new(uint64(1790085318)), Key: strings.Repeat("a", 256), Value: new(100.0)},
+			name:    "256 x a in key",
+			event:   Event{ID: validID, Timestamp: new(validTs), Key: strings.Repeat("a", 256), Value: new(100.0)},
 			wantErr: true,
 		},
 		{
-			name:    `json with a\x00b in key`,
-			event:   Event{ID: validID, Timestamp: new(uint64(1790085318)), Key: "a\x00b", Value: new(100.0)},
+			name:    `a\x00b in key`,
+			event:   Event{ID: validID, Timestamp: new(validTs), Key: "a\x00b", Value: new(100.0)},
+			wantErr: true,
+		},
+		{
+			name:    "valid time now",
+			event:   Event{ID: validID, Timestamp: new(validTs), Key: "input_traffic", Value: new(100.0)},
+			wantErr: false,
+		},
+		{
+			name:    "valid time now + 5min",
+			event:   Event{ID: validID, Timestamp: new(uint64(now.Add(5 * time.Minute).Unix())), Key: "input_traffic", Value: new(100.0)},
+			wantErr: false,
+		},
+		{
+			name:    "invalid time now + 5min + 1s",
+			event:   Event{ID: validID, Timestamp: new(uint64(now.Add(5*time.Minute + time.Second).Unix())), Key: "input_traffic", Value: new(100.0)},
+			wantErr: true,
+		},
+		{
+			name:    "valid time now - 7d",
+			event:   Event{ID: validID, Timestamp: new(uint64(now.Add(-7 * 24 * time.Hour).Unix())), Key: "input_traffic", Value: new(100.0)},
+			wantErr: false,
+		},
+		{
+			name:    "invalid time now - 7d - 1s",
+			event:   Event{ID: validID, Timestamp: new(uint64(now.Add(-7*24*time.Hour - time.Second).Unix())), Key: "input_traffic", Value: new(100.0)},
+			wantErr: true,
+		},
+		{
+			name:    "invalid time 0",
+			event:   Event{ID: validID, Timestamp: new(uint64(0)), Key: "input_traffic", Value: new(100.0)},
+			wantErr: true,
+		},
+		{
+			name:    "invalid time max uint64",
+			event:   Event{ID: validID, Timestamp: new(uint64(math.MaxUint64)), Key: "input_traffic", Value: new(100.0)},
 			wantErr: true,
 		},
 	}
@@ -216,7 +259,7 @@ func TestValidateEvent(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 
-			err := validateEvent(tc.event)
+			err := validateEvent(tc.event, now)
 
 			if (err == nil) == tc.wantErr {
 				t.Errorf("validateEvent() err = %v, wantErr %v", err, tc.wantErr)

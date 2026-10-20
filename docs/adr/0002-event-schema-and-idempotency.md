@@ -40,7 +40,32 @@ A duplicate is treated as success. Without `ON CONFLICT`, a duplicate raises `23
     - `key` longer than 255 characters (Go's `len()` counts bytes, not characters);
     - NUL bytes (`\x00`) in `key`, which PostgreSQL rejects in text columns;
     - `event_time` outside the range PostgreSQL accepts (the API field is `uint64`; PostgreSQL has no unsigned types).
-- The accepted window for past and future `event_time` values is still open.
+- The accepted window for past and future `event_time` values is defined in the amendment below.
 - PostgreSQL error `DETAIL` messages include the offending row; they must not be logged without sanitization.
 - `now()` returns the transaction start time, so all events inserted in the same transaction share the same `ingested_at`.
 - Integration tests against a real PostgreSQL instance will cover these boundary cases when the consumer is implemented.
+
+## Amendment (2026-10-19)
+
+This amendment closes the `event_time` acceptance window left open in Consequences.
+
+### Decision
+
+- The API accepts `event_time` values from `now - maxEventAge` (7 days) to `now + maxFutureSkew` (5 minutes). Both bounds are inclusive.
+- Values outside the window are rejected with `400 Bad Request`.
+- The window is enforced only by the API. The database keeps only time-invariant constraints.
+- Bounds are computed with `time.Time.Unix()`, which returns `int64`, and converted to `uint64` before being compared with the request field.
+- The database must be created with `UTF8` encoding.
+
+### Rationale
+
+- `maxFutureSkew` (5 minutes) tolerates clock skew between client and server hosts without accepting timestamps that are clearly wrong.
+- `maxEventAge` (7 days) tolerates connectivity loss between devices and the collector. A `400` is not retryable, so the client drops the event: the window bounds how long an outage can last without permanent data loss. Older events are more likely to come from a faulty clock than from a legitimate outage.
+- A `CHECK` constraint comparing `event_time` with `now()` would be evaluated at insert time, not at acceptance time. An event accepted inside the window may fall outside it by the time the consumer inserts it, because `now()` has advanced by the consumer lag. The insert fails, the offset is never committed, and the consumer reprocesses the message forever (poison message).
+- The API validates `key` as UTF-8. With a non-`UTF8` database (e.g., `LATIN1`), a character the database encoding cannot represent is accepted with `202`, but the consumer's insert fails with `22P05` (untranslatable character), causing a poison message.
+
+### Consequences
+
+- `timestamp: 0` is rejected because it is older than `maxEventAge`. This is a breaking change: it previously returned `200`.
+- Clients and the collector must keep their clocks synchronized (e.g., NTP); skew above 5 minutes causes rejections.
+- Events held by a client for more than 7 days are rejected and permanently lost.

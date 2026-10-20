@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -16,7 +17,12 @@ type Event struct {
 	Value     *float64 `json:"value"`
 }
 
-func validateEvent(e Event) error {
+const (
+	maxFutureSkew = 5 * time.Minute
+	maxEventAge   = 7 * 24 * time.Hour
+)
+
+func validateEvent(e Event, now time.Time) error {
 	if e.ID == "" {
 		return errors.New("missing id")
 	}
@@ -36,6 +42,17 @@ func validateEvent(e Event) error {
 
 	if e.Timestamp == nil {
 		return errors.New("missing timestamp")
+	}
+
+	maxTs := uint64(now.Add(maxFutureSkew).Unix())
+	minTs := uint64(now.Add(-maxEventAge).Unix())
+
+	if *e.Timestamp > maxTs {
+		return fmt.Errorf("timestamp %d is after max allowed %d", *e.Timestamp, maxTs)
+	}
+
+	if *e.Timestamp < minTs {
+		return fmt.Errorf("timestamp %d is before min allowed %d", *e.Timestamp, minTs)
 	}
 
 	if e.Key == "" {

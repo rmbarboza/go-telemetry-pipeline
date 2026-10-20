@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"time"
 )
 
 func metricsHandler(w http.ResponseWriter, r *http.Request) {
@@ -19,7 +20,7 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := validateEvent(metric); err != nil {
+	if err := validateEvent(metric, time.Now()); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
