@@ -1,6 +1,6 @@
 # go-telemetry-pipeline
 
-Go HTTP API for validating metric events. Kafka and PostgreSQL integration is planned.
+Go HTTP API for validating metric events, with an idempotent PostgreSQL persistence layer. Kafka integration is planned.
 
 # Running the application
 
@@ -23,4 +23,34 @@ A valid event responds with HTTP status 200 and invalid json or valid json with 
 
 GET requests are not allowed and response for this request is status 405.
 
-Currently the handler only evaluates the event. No action is dispatched to Kafka or any other service.
+Currently the handler only validates the event. It does not persist it or dispatch it to Kafka yet; the persistence layer (`Store.InsertEvent`) exists and is covered by integration tests, but is not wired to the HTTP route.
+
+# Running integration tests
+
+Integration tests run against a real PostgreSQL database. Use a disposable database: tests insert rows and do not clean them up.
+
+Start PostgreSQL in Docker and apply the migration:
+
+```bash
+docker run -d --name telemetry-pg2 \
+  -e POSTGRES_USER=telemetry \
+  -e POSTGRES_PASSWORD=telemetry \
+  -e POSTGRES_DB=telemetry \
+  -p 5432:5432 \
+  postgres:18
+
+docker exec -i telemetry-pg psql -U telemetry -d telemetry < migrations/0001_create_event.sql
+```
+
+The database must use `UTF8` encoding (the default for the official image), so that every key accepted by the API is also accepted by the database (see ADR 0002).
+
+Point the tests to the database and run them:
+
+```bash
+export TELEMETRY_DATABASE_URL='postgres://telemetry:telemetry@localhost:5432/telemetry?sslmode=disable'
+go test -count=1 ./...
+```
+
+When `TELEMETRY_DATABASE_URL` is not set, integration tests are skipped and only unit tests run.
+
+To reset the database, remove the container (`docker rm -f telemetry-pg`) and repeat the steps above.
