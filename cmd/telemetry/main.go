@@ -3,19 +3,29 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	gotelemetrypipeline "github.com/rmbarboza/go-telemetry-pipeline"
+	"github.com/twmb/franz-go/pkg/kgo"
 )
 
-import gotelemetrypipeline "github.com/rmbarboza/go-telemetry-pipeline"
-
-func main() {
-
-	mux := gotelemetrypipeline.NewMux()
+func run() error {
+	client, err := kgo.NewClient(
+		kgo.SeedBrokers("localhost:9092"),
+		kgo.DefaultProduceTopic("events"),
+	)
+	if err != nil {
+		return fmt.Errorf("create client: %w", err)
+	}
+	defer client.Close()
+	pub := gotelemetrypipeline.NewKafkaPublisher(client)
+	mux := gotelemetrypipeline.NewMux(pub)
 
 	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -34,11 +44,7 @@ func main() {
 	select {
 	case err := <-serverErr:
 		if !errors.Is(err, http.ErrServerClosed) {
-			slog.Error(
-				"Unexpected server shutdown",
-				"error", err,
-			)
-			os.Exit(1)
+			return fmt.Errorf("unexpected server shutdown: %w", err)
 		}
 	case <-signalCtx.Done():
 		slog.Info("shutdown requested")
@@ -53,16 +59,20 @@ func main() {
 
 		if err == nil {
 			slog.Info(
-				"Shutdown finished",
+				"shutdown finished",
 				"duration_ms", time.Since(begin).Milliseconds(),
 			)
 		} else {
-			slog.Error(
-				"Shutdown failed",
-				"duration_ms", time.Since(begin).Milliseconds(),
-				"error", err,
-			)
-			os.Exit(1)
+			return fmt.Errorf("shutdown after %d ms: %w", time.Since(begin).Milliseconds(), err)
 		}
+	}
+
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		slog.Error("telemetry stopped", "error", err)
+		os.Exit(1)
 	}
 }
