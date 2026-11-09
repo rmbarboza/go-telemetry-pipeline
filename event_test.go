@@ -16,10 +16,12 @@ import (
 const validID = "01890123-4567-7890-a123-456789abcdef"
 
 type fakePublisher struct {
-	err error
+	err   error
+	calls int
 }
 
 func (f *fakePublisher) Publish(ctx context.Context, event Event) error {
+	f.calls++
 	return f.err
 }
 
@@ -102,33 +104,37 @@ func TestHTTPRouteMetric(t *testing.T) {
 		name           string
 		body           string
 		method         string
-		pub            Publisher
+		pub            *fakePublisher
 		wantStatus     int
 		wantRetryAfter bool
+		wantCalls      int
 	}
 
 	now := time.Now()
 
 	tests := []testCase{
 		{
-			name:       "json without Value",
-			body:       `{"id": "` + validID + `","timestamp": ` + strconv.FormatInt(now.Unix(), 10) + `, "key": "input_traffic"}`,
-			method:     "POST",
-			pub:        &fakePublisher{err: nil},
-			wantStatus: http.StatusBadRequest,
-		},
-		{
 			name:       "json with value",
 			body:       `{"id": "` + validID + `","timestamp": ` + strconv.FormatInt(now.Unix(), 10) + `, "key": "input_traffic", "value": 0}`,
 			method:     "POST",
 			pub:        &fakePublisher{err: nil},
 			wantStatus: http.StatusAccepted,
+			wantCalls:  1,
+		},
+		{
+			name:       "json without Value",
+			body:       `{"id": "` + validID + `","timestamp": ` + strconv.FormatInt(now.Unix(), 10) + `, "key": "input_traffic"}`,
+			method:     "POST",
+			pub:        &fakePublisher{err: nil},
+			wantStatus: http.StatusBadRequest,
+			wantCalls:  0,
 		},
 		{
 			name:       "invalid method GET",
 			method:     "GET",
 			pub:        &fakePublisher{err: nil},
 			wantStatus: http.StatusMethodNotAllowed,
+			wantCalls:  0,
 		},
 		{
 			name:       "json without timestamp",
@@ -136,6 +142,7 @@ func TestHTTPRouteMetric(t *testing.T) {
 			method:     "POST",
 			pub:        &fakePublisher{err: nil},
 			wantStatus: http.StatusBadRequest,
+			wantCalls:  0,
 		},
 		{
 			name:       "json with timestamp 0",
@@ -143,6 +150,7 @@ func TestHTTPRouteMetric(t *testing.T) {
 			method:     "POST",
 			pub:        &fakePublisher{err: nil},
 			wantStatus: http.StatusBadRequest,
+			wantCalls:  0,
 		},
 		{
 			name:       "json without key",
@@ -150,6 +158,7 @@ func TestHTTPRouteMetric(t *testing.T) {
 			method:     "POST",
 			pub:        &fakePublisher{err: nil},
 			wantStatus: http.StatusBadRequest,
+			wantCalls:  0,
 		},
 		{
 			name:       "json with key empty string",
@@ -157,6 +166,7 @@ func TestHTTPRouteMetric(t *testing.T) {
 			method:     "POST",
 			pub:        &fakePublisher{err: nil},
 			wantStatus: http.StatusBadRequest,
+			wantCalls:  0,
 		},
 		{
 			name:           "service unavailable",
@@ -165,6 +175,7 @@ func TestHTTPRouteMetric(t *testing.T) {
 			pub:            &fakePublisher{err: errors.New("broker down")},
 			wantStatus:     http.StatusServiceUnavailable,
 			wantRetryAfter: true,
+			wantCalls:      1,
 		},
 	}
 
@@ -180,6 +191,10 @@ func TestHTTPRouteMetric(t *testing.T) {
 			rec := httptest.NewRecorder()
 			mux := NewMux(tc.pub)
 			mux.ServeHTTP(rec, req)
+
+			if tc.pub.calls != tc.wantCalls {
+				t.Errorf("received calls: %d, want: %d", tc.pub.calls, tc.wantCalls)
+			}
 
 			if rec.Code != tc.wantStatus {
 				t.Errorf("received status: %d, want: %d", rec.Code, tc.wantStatus)
