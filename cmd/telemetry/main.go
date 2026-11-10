@@ -15,6 +15,15 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
+const (
+	readHeaderTimeout = 3 * time.Second
+	readTimeout       = 5 * time.Second
+	writeMargin       = 1 * time.Second
+	// ADR 0003: publish deadline < WriteTimeout < client timeout.
+	writeTimeout = readTimeout + gotelemetrypipeline.PublishTimeout + writeMargin
+	idleTimeout  = 60 * time.Second
+)
+
 func run() error {
 	client, err := kgo.NewClient(
 		kgo.SeedBrokers("localhost:9092"),
@@ -31,8 +40,12 @@ func run() error {
 	defer stop()
 
 	server := http.Server{
-		Addr:    ":8080",
-		Handler: mux,
+		Addr:              ":8080",
+		Handler:           mux,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
 	}
 
 	serverErr := make(chan error, 1)

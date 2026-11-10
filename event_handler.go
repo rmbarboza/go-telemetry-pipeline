@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	// Timeout to publish an event to the publisher.
-	publishTimeout = 5 * time.Second
+	// PublishTimeout bounds each publish attempt. The HTTP server's
+	// WriteTimeout is derived from it (ADR 0003).
+	PublishTimeout = 5 * time.Second
 	// Retry-After header value in seconds when the publisher fails to publish an event.
 	retryAfterSeconds = "5"
 )
@@ -35,7 +36,7 @@ func newMetricsHandler(p Publisher) http.HandlerFunc {
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(r.Context(), publishTimeout)
+		ctx, cancel := context.WithTimeout(r.Context(), PublishTimeout)
 		defer cancel()
 
 		if err := p.Publish(ctx, metric); err != nil {
