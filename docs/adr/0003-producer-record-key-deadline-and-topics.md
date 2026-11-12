@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Relates to ADR 0001 and ADR 0002
+Accepted. Relates to ADR 0001 and ADR 0002.
 
 ## Context
 
@@ -18,7 +18,7 @@ durability.
   larger batches.
 - Each publish has its own deadline, shorter than the request limits:
   `publish deadline < server WriteTimeout < client timeout`. Values live in
-  constants and in the README.
+  named constants and in `docs/architecture.md`.
 - Topics are provisioned explicitly; `AllowAutoTopicCreation` stays disabled.
 
 ## Alternatives considered
