@@ -1,4 +1,4 @@
-package gotelemetrypipeline
+package store
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rmbarboza/go-telemetry-pipeline/internal/event"
 )
 
 func newTestPool(t *testing.T) *pgxpool.Pool {
@@ -41,7 +42,7 @@ func TestDatabasePing(t *testing.T) {
 	}
 }
 
-func newTestEvent(t *testing.T) Event {
+func newTestEvent(t *testing.T) event.Event {
 	t.Helper()
 	id, err := uuid.NewV7()
 	if err != nil {
@@ -51,12 +52,12 @@ func newTestEvent(t *testing.T) Event {
 	now := time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC)
 	ts := uint64(now.Unix())
 
-	ev := Event{ID: id.String(), Timestamp: new(ts), Key: "input_traffic", Value: new(100.0)}
+	ev := event.Event{ID: id.String(), Timestamp: new(ts), Key: "input_traffic", Value: new(100.0)}
 
 	return ev
 }
 
-func assertStoredEvent(ctx context.Context, t *testing.T, pool *pgxpool.Pool, want Event) {
+func assertStoredEvent(ctx context.Context, t *testing.T, pool *pgxpool.Pool, want event.Event) {
 	t.Helper()
 	var (
 		key       string
@@ -84,7 +85,7 @@ func assertStoredEvent(ctx context.Context, t *testing.T, pool *pgxpool.Pool, wa
 
 func TestStoreInsertEvent(t *testing.T) {
 	pool := newTestPool(t)
-	store := NewStore(pool)
+	store := New(pool)
 
 	t.Run("new event is inserted", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)

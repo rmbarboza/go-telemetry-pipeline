@@ -11,7 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	gotelemetrypipeline "github.com/rmbarboza/go-telemetry-pipeline"
+	"github.com/rmbarboza/go-telemetry-pipeline/internal/httpapi"
+	"github.com/rmbarboza/go-telemetry-pipeline/internal/kafka"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
@@ -20,7 +21,7 @@ const (
 	readTimeout       = 5 * time.Second
 	writeMargin       = 1 * time.Second
 	// ADR 0003: publish deadline < WriteTimeout < client timeout.
-	writeTimeout = readTimeout + gotelemetrypipeline.PublishTimeout + writeMargin
+	writeTimeout = readTimeout + httpapi.PublishTimeout + writeMargin
 	idleTimeout  = 60 * time.Second
 )
 
@@ -33,8 +34,8 @@ func run() error {
 		return fmt.Errorf("create client: %w", err)
 	}
 	defer client.Close()
-	pub := gotelemetrypipeline.NewKafkaPublisher(client)
-	mux := gotelemetrypipeline.NewMux(pub)
+	pub := kafka.NewPublisher(client)
+	mux := httpapi.NewMux(pub)
 
 	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

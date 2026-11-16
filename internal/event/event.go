@@ -1,4 +1,4 @@
-package gotelemetrypipeline
+package event
 
 import (
 	"errors"
@@ -22,7 +22,7 @@ const (
 	maxEventAge   = 7 * 24 * time.Hour
 )
 
-func validateEvent(e Event, now time.Time) error {
+func (e Event) Validate(now time.Time) error {
 	if e.ID == "" {
 		return errors.New("missing id")
 	}

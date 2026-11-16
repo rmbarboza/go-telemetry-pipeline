@@ -1,4 +1,4 @@
-package gotelemetrypipeline
+package httpapi
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/rmbarboza/go-telemetry-pipeline/internal/event"
 )
 
 const (
@@ -25,13 +27,13 @@ func newMetricsHandler(p Publisher) http.HandlerFunc {
 			return
 		}
 
-		metric := Event{}
+		metric := event.Event{}
 		if err := json.Unmarshal(body, &metric); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
-		if err := validateEvent(metric, time.Now()); err != nil {
+		if err := metric.Validate(time.Now()); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
