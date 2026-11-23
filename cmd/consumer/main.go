@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rmbarboza/go-telemetry-pipeline/internal/consumer"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
@@ -22,22 +23,6 @@ const (
 	// after a shutdown signal.
 	commitTimeout = 5 * time.Second
 )
-
-// processBatch handles recs in order and returns the ones that were
-// stored or skipped, so the caller commits only those (ADR 0004).
-func processBatch(recs []*kgo.Record) ([]*kgo.Record, error) {
-	processed := make([]*kgo.Record, 0, len(recs))
-	for _, r := range recs {
-		slog.Info("event consumed",
-			"partition", r.Partition,
-			"offset", r.Offset,
-			"value", string(r.Value),
-		)
-
-		processed = append(processed, r)
-	}
-	return processed, nil
-}
 
 func run() error {
 	client, err := kgo.NewClient(
@@ -67,7 +52,7 @@ func run() error {
 			slog.Error("fetch failed", "topic", t, "partition", p, "error", err)
 		})
 
-		recs, errProcess := processBatch(fetches.Records())
+		recs, errProcess := consumer.ProcessBatch(fetches.Records())
 
 		var errCommit error
 		if len(recs) > 0 {
