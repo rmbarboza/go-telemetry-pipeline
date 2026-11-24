@@ -10,7 +10,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rmbarboza/go-telemetry-pipeline/internal/consumer"
+	"github.com/rmbarboza/go-telemetry-pipeline/internal/store"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
@@ -25,6 +27,19 @@ const (
 )
 
 func run() error {
+	dsn := os.Getenv("TELEMETRY_DATABASE_URL")
+	if dsn == "" {
+		return errors.New("environment variable 'TELEMETRY_DATABASE_URL' is not set")
+	}
+
+	pool, err := pgxpool.New(context.Background(), dsn)
+	if err != nil {
+		return fmt.Errorf("create pool: %w", err)
+	}
+	defer pool.Close()
+
+	eventStore := store.New(pool)
+
 	client, err := kgo.NewClient(
 		kgo.SeedBrokers("localhost:9092"),
 		kgo.ConsumeTopics(topic),
@@ -52,7 +67,7 @@ func run() error {
 			slog.Error("fetch failed", "topic", t, "partition", p, "error", err)
 		})
 
-		recs, errProcess := consumer.ProcessBatch(fetches.Records())
+		recs, errProcess := consumer.ProcessBatch(context.Background(), eventStore, fetches.Records())
 
 		var errCommit error
 		if len(recs) > 0 {
