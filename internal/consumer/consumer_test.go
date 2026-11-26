@@ -26,32 +26,51 @@ func (f *fakeStore) InsertEvent(ctx context.Context, e event.Event) (bool, error
 	return f.inserted, nil
 }
 
-// TestProcessBatch checks that every record is returned for commit
-// when all of them decode and the store accepts them.
+// TestProcessBatch checks which records ProcessBatch returns for
+// commit and how many times it calls the store.
 func TestProcessBatch(t *testing.T) {
-	store := &fakeStore{}
 	recs := []*kgo.Record{
 		{Offset: 0, Value: []byte(`{"id": "1", "timestamp": 123, "key": "input_traffic", "value": 100}`)},
 		{Offset: 1, Value: []byte(`{"id": "2", "timestamp": 124, "key": "input_traffic", "value": 200}`)},
 		{Offset: 2, Value: []byte(`{"id": "3", "timestamp": 125, "key": "input_traffic", "value": 300}`)},
 	}
 
-	got, err := ProcessBatch(context.Background(), store, recs)
-	if err != nil {
-		t.Fatalf("ProcessBatch returned error: %v", err)
+	type testCase struct {
+		name      string
+		store     *fakeStore
+		want      []*kgo.Record
+		wantCalls int
 	}
 
-	if len(got) != len(recs) {
-		t.Fatalf("ProcessBatch returned %d records, want %d", len(got), len(recs))
+	tests := []testCase{
+		{
+			name:      "all records processed",
+			store:     &fakeStore{},
+			want:      recs,
+			wantCalls: len(recs),
+		},
 	}
 
-	for i := range recs {
-		if got[i] != recs[i] {
-			t.Errorf("record %d: got offset %d, want offset %d", i, got[i].Offset, recs[i].Offset)
-		}
-	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ProcessBatch(context.Background(), tc.store, recs)
+			if err != nil {
+				t.Fatalf("ProcessBatch returned error: %v", err)
+			}
 
-	if store.calls != len(recs) {
-		t.Fatalf("InsertEvent was called %d times, want %d", store.calls, len(recs))
+			if len(got) != len(tc.want) {
+				t.Fatalf("ProcessBatch returned %d records, want %d", len(got), len(tc.want))
+			}
+
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Errorf("record %d: got offset %d, want offset %d", i, got[i].Offset, tc.want[i].Offset)
+				}
+			}
+
+			if tc.store.calls != tc.wantCalls {
+				t.Fatalf("InsertEvent was called %d times, want %d", tc.store.calls, tc.wantCalls)
+			}
+		})
 	}
 }
