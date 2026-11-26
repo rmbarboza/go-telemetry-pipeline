@@ -2,6 +2,7 @@ package consumer
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/rmbarboza/go-telemetry-pipeline/internal/event"
@@ -40,6 +41,7 @@ func TestProcessBatch(t *testing.T) {
 		store     *fakeStore
 		want      []*kgo.Record
 		wantCalls int
+		wantErr   bool
 	}
 
 	tests := []testCase{
@@ -49,13 +51,24 @@ func TestProcessBatch(t *testing.T) {
 			want:      recs,
 			wantCalls: len(recs),
 		},
+		{
+			name:      "failure on second call",
+			store:     &fakeStore{inserted: true, failOnCall: 2, err: errors.New("database unavailable")},
+			want:      recs[:1],
+			wantCalls: 2,
+			wantErr:   true,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := ProcessBatch(context.Background(), tc.store, recs)
-			if err != nil {
-				t.Fatalf("ProcessBatch returned error: %v", err)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("ProcessBatch error = %v, wantErr %v", err, tc.wantErr)
+			}
+
+			if tc.wantErr && !errors.Is(err, tc.store.err) {
+				t.Fatalf("ProcessBatch error = %v, want it to wrap %v", err, tc.store.err)
 			}
 
 			if len(got) != len(tc.want) {
