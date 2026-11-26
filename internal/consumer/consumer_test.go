@@ -44,8 +44,8 @@ func TestProcessBatch(t *testing.T) {
 
 	tests := []testCase{
 		{
-			name:      "all records processed",
-			store:     &fakeStore{},
+			name:      "all records inserted",
+			store:     &fakeStore{inserted: true},
 			want:      recs,
 			wantCalls: len(recs),
 		},
