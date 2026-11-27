@@ -15,7 +15,7 @@ flowchart LR
     A -->|produce, acks=all| K[(Kafka topic)]
     K -->|poll| W[Consumer]
     W -->|INSERT ... ON CONFLICT DO NOTHING| P[(PostgreSQL)]
-    W -.->|commit offset after INSERT| K
+    W -.->|commit offsets per batch| K
 ```
 
 | Component | Responsibility |
@@ -23,7 +23,7 @@ flowchart LR
 | Client | Generates a UUIDv7 `id` on the first attempt and reuses it on every retry. Retries on `503`, on timeouts and on lost responses, with exponential backoff and jitter. |
 | Ingestion API | Decodes and validates the event, rejecting anything the database would reject. Produces valid events to Kafka and maps the outcome to an HTTP status. Holds no state. |
 | Kafka | Durable buffer between ingestion and storage. Replication factor 3, `min.insync.replicas=2`, unclean leader election disabled. |
-| Consumer | Reads events, inserts them idempotently into PostgreSQL and commits the offset only after the insert succeeds. |
+| Consumer | Reads events, inserts them idempotently into PostgreSQL and commits offsets only for records it stored or skipped. |
 | PostgreSQL | System of record. The primary key on `id` is the final deduplication point. |
 
 ## Acknowledgement boundaries
@@ -32,7 +32,7 @@ flowchart LR
 |---|---|---|
 | Kafka ack | Partition leader, after every replica in the current ISR has the record and the ISR has at least `min.insync.replicas` members | The event survives the loss of one broker. |
 | `202 Accepted` | Ingestion API, only after the Kafka ack | The client may discard the event. It does not mean the event is in PostgreSQL or visible to queries. |
-| Offset commit | Consumer, only after the `INSERT` succeeds | The event is in PostgreSQL. It will not be reprocessed after a restart. |
+| Offset commit | Consumer, only after the record is stored or skipped | The event is in PostgreSQL, or was skipped as malformed or rejected by the database (see [Consumer](#consumer)). It will not be reprocessed after a restart. |
 
 The durability guarantee is bounded by `min.insync.replicas - 1 = 1` broker
 failure. If two brokers fail, writes are refused (`503`). Events that were
@@ -110,6 +110,49 @@ Clients should use a timeout longer than 11 s, for example 15 s. A shorter
 timeout gives up before the API answers, so the client gets no status and no
 `Retry-After`; it must still retry with the same `id`.
 
+## Consumer
+
+`cmd/consumer` reads the topic `events` in the consumer group
+`telemetry-store`. With no committed offset, the group starts at the earliest
+retained offset.
+
+### Batches and offsets
+
+- Auto-commit is disabled. After each poll the consumer processes the records
+  in order and commits, once per batch, the offsets of the records it stored
+  or skipped. Processing stops at the first record that is neither.
+- A rebalance waits until the current batch is committed, so partitions are
+  never handed over with uncommitted work.
+- On `SIGINT` or `SIGTERM` the consumer stops polling, finishes the current
+  batch and commits it with its own deadline (5 s), independent of the signal.
+- A crash before the commit reprocesses the batch; duplicates are removed by
+  `id`.
+
+### Record outcomes
+
+| Record | Outcome | Offset |
+|---|---|---|
+| New event | Inserted. | Committed. |
+| Duplicate `id` | Nothing inserted; logged. | Committed. |
+| Value that does not decode into an `Event` | Logged at error level with partition and offset; skipped. | Committed. |
+| Event that breaks the event rules of the HTTP contract, except the `timestamp` window | Logged at error level with partition, offset and `id`; skipped. | Committed. |
+| Rejected by the database (SQLSTATE class `22` or `23`) | Logged at error level with `id`; skipped. | Committed. |
+| Any other error (database unreachable, timeout, unknown) | The same record is retried with capped backoff; the consumer is blocked. | Not committed. |
+
+The consumer does not apply the `timestamp` window: it compares the event with
+the time of receipt, so only the API checks it, and an event reprocessed after
+a long lag is still stored.
+
+Skipped records are lost until a dead-letter topic exists. The API only
+publishes events that pass its validation, so a skipped record means another
+producer wrote to the topic, or the API and the database disagree on a rule.
+While the consumer is blocked, lag grows and the API keeps returning `202`;
+`retention.ms` bounds how long the database can be down without losing
+events.
+
+See [ADR 0004](adr/0004-consumer-offset-commits-and-errors.md) and
+[ADR 0005](adr/0005-consumer-malformed-records.md).
+
 ## Data model
 
 One table, `event`, defined in
@@ -128,9 +171,9 @@ One table, `event`, defined in
 |---|---|---|
 | HTTP API | `POST /metrics` validates every ADR 0002 rule, publishes to Kafka and returns `202`, `400`, `405` or `503` with `Retry-After`. Server timeouts as above. Graceful shutdown in `cmd/telemetry`. | Request body size limit (`http.MaxBytesReader`). |
 | Kafka | Idempotent producer (`franz-go`, `acks=all`) publishing to topic `events` with a `nil` record key. Local single broker with replication factor 1 and `min.insync.replicas=1`, which deviates from ADR 0001. | Three-broker cluster matching ADR 0001. |
-| Consumer | Not implemented. | Idempotent insert, offset commit after insert (Weeks 7–8). |
-| PostgreSQL | `Store.InsertEvent` with integration tests. Schema applied manually from `migrations/`. Not wired to the API. | Wired to the consumer; migration tool (Week 11). |
-| Operations | Local `go run`. | CI, Docker Compose, metrics, logs and traces (Weeks 9–11). |
+| Consumer | `cmd/consumer` with the batch, offset, rebalance and shutdown behaviour above. Processing only logs each record; nothing is inserted. | Insert into PostgreSQL and the record outcomes above (Weeks 7–8). |
+| PostgreSQL | `Store.InsertEvent` with integration tests. Schema applied manually from `migrations/`. Not used by any binary yet. | Wired to the consumer; migration tool (Week 11). |
+| Operations | Local `go run`. CI runs `gofmt`, `go vet` and `go test -race` on pull requests and on pushes to `main`; integration tests are skipped there (no database). | PostgreSQL in CI, Docker Compose, metrics, logs and traces (Weeks 9–11). |
 
 ## Decisions and open questions
 
@@ -139,9 +182,10 @@ Decisions:
 - [ADR 0001 — Ingestion acknowledgement boundary](adr/0001-ingestion-ack-boundary.md)
 - [ADR 0002 — Event schema and idempotency](adr/0002-event-schema-and-idempotency.md)
 - [ADR 0003 — Producer record key, publish deadline and topic provisioning](adr/0003-producer-record-key-deadline-and-topics.md)
+- [ADR 0004 — Consumer offset commits and error handling](adr/0004-consumer-offset-commits-and-errors.md)
+- [ADR 0005 — Consumer handling of malformed records](adr/0005-consumer-malformed-records.md)
 
 Open questions:
 
-- Dead-letter handling for events that fail for reasons other than duplicates
-  (Week 8).
+- Dead-letter topic for skipped records (Week 8).
 - Textual events (such as syslog) as a future extension of the contract.
