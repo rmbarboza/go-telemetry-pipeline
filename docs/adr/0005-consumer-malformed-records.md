@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed. Relates to ADR 0002 and ADR 0004.
+Accepted. Relates to ADR 0002 and ADR 0004.
 
 ## Context
 
